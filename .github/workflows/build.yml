@@ -107,19 +107,18 @@ jobs:
               .sign(key, hashes.SHA256())
           )
 
-          encryption = (
-              PrivateFormat.PKCS12.encryption_builder()
-              .key_cert_algorithm(pkcs12.PBES.PBESv1SHA1And3KeyTripleDESCBC)
-              .hmac_hash(hashes.SHA1())
-              .build(b"")
-          )
-
+          # Builder для PBES1 с пустым паролем падает с
+          # "Password must be 1 or more bytes". Использую NoEncryption()
+          # вместо builder'а — p12 без шифрования, security import -P ''
+          # такие p12 разбирает (encryption optional в PKCS#12 spec).
+          # GenerateProfiles и ImportCertificates обе хардкодят -P ''
+          # / passin pass: — менять их не надо.
           p12_bytes = pkcs12.serialize_key_and_certificates(
               name=b"Opengram Fake Signing",
               key=key,
               cert=cert,
               cas=None,
-              encryption_algorithm=encryption,
+              encryption_algorithm=serialization.NoEncryption(),
           )
 
           out = "build-system/fake-codesigning/certs"
