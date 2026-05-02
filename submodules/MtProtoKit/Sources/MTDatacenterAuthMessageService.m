@@ -48,28 +48,29 @@ static NSArray<MTDatacenterAuthPublicKey *> *defaultPublicKeys(bool isProduction
     static NSArray<MTDatacenterAuthPublicKey *> *productionPublicKeys = nil;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
+        // Это публичный ключ моего piltover-сервера (51.250.119.114:4430).
+        // На сервере он лежит как RSA PUBLIC KEY (PKCS#1), здесь привожу в
+        // PKCS#8/SubjectPublicKeyInfo (то что MtProtoKit ожидает в формате
+        // -----BEGIN PUBLIC KEY-----) — это просто PKCS#1-блок с префиксом
+        // SEQUENCE+AlgorithmIdentifier, поэтому base64-блок начинается с
+        // MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A. Один и тот же ключ для testing
+        // и production — у меня нет отдельных DC под test mode.
+        NSString *opengramPublicKey = @"-----BEGIN PUBLIC KEY-----\n"
+            "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1uh719A/Dx1ijxFO1ftS\n"
+            "jT9Bf09yz+32l9E8LXOgDQkCO1urgsqgVk3xWmrh7CtOJeMsB4pN3d9Ljh1+h56R\n"
+            "HcyTNt4R+cjBqPWM/PM0fwXzyIlAEuQkI9y3UgMJ76a1DHiMvjbG73Tv+YkRgIGx\n"
+            "T8Nl5wA3yX1Q4D2S1ysMBM0JL5oIASHEy01TeT/27nhmt0Q/LFxX8j8e68Pgdvlo\n"
+            "WI1x6kRs+JmpfpMrriQ8oV8MTYdg43Q4Xr1m6p3XJjucOWDPi7aXJkg9ivT+ne5C\n"
+            "0bVRNLcS+cIohhOMVy1R3rTTDn8URAPeXV3QFuXAg/nXxGzQFGZHxAoNedGEylKj\n"
+            "8wIDAQAB\n"
+            "-----END PUBLIC KEY-----";
+
         testingPublicKeys = @[
-            [[MTDatacenterAuthPublicKey alloc] initWithPublicKey:@"-----BEGIN PUBLIC KEY-----\n"
-             "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAy2+9TLsRl6RJV6QG7yXO\n"
-             "Y195odD8+Arn4lBpItEJnPNvvySU12YsOZOtnYi637dc7nEh7LNlAN/pcfq/7IkR\n"
-             "dPayP/pjiDa4i+aSGU01jHv0odR91HeufV5GQS/kfGHQEcehMjYZ5Nj+X4XpoU8z\n"
-             "jM9YSoGzsX3cm1GG8qlO3TYa5D5EfxtwiAFlDnG/ZD2FoAFtnf7iuWx5WHpHLTli\n"
-             "lrXj7tgCQPwvkia7jc5Vekbxy3InYF4CFqzOkmRZfh7yXp8CukgWMk5ujj5vQ5Qw\n"
-             "R8XiLPEI+QO39BiyUu0g2OtOj2oq3hKd9JXKK+T6dkFXbpMy14DNbRIg0qEftHqM\n"
-             "uQIDAQAb\n"
-             "-----END PUBLIC KEY-----"]
+            [[MTDatacenterAuthPublicKey alloc] initWithPublicKey:opengramPublicKey]
         ];
 
         productionPublicKeys = @[
-            [[MTDatacenterAuthPublicKey alloc] initWithPublicKey:@"-----BEGIN PUBLIC KEY-----\n"
-             "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAy2+9TLsRl6RJV6QG7yXO\n"
-             "Y195odD8+Arn4lBpItEJnPNvvySU12YsOZOtnYi637dc7nEh7LNlAN/pcfq/7IkR\n"
-             "dPayP/pjiDa4i+aSGU01jHv0odR91HeufV5GQS/kfGHQEcehMjYZ5Nj+X4XpoU8z\n"
-             "jM9YSoGzsX3cm1GG8qlO3TYa5D5EfxtwiAFlDnG/ZD2FoAFtnf7iuWx5WHpHLTli\n"
-             "lrXj7tgCQPwvkia7jc5Vekbxy3InYF4CFqzOkmRZfh7yXp8CukgWMk5ujj5vQ5Qw\n"
-             "R8XiLPEI+QO39BiyUu0g2OtOj2oq3hKd9JXKK+T6dkFXbpMy14DNbRIg0qEftHqM\n"
-             "uQIDAQAb\n"
-             "-----END PUBLIC KEY-----"]
+            [[MTDatacenterAuthPublicKey alloc] initWithPublicKey:opengramPublicKey]
         ];
     });
     if (isProduction) {

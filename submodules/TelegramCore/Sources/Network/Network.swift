@@ -526,26 +526,30 @@ func initializedNetwork(accountId: AccountRecordId, arguments: NetworkInitializa
                 }
             }
             
+            // Seed-адрес моего piltover-сервера. Все DC указывают на одну
+            // машину (single-DC деплой); порт 4430 — то что слушает MTProto-
+            // gateway. При появлении прод-инфры перейду на dc-options из
+            // help.GetConfig (overlay в lk_piltover_config_override).
             let seedAddressList: [Int: [String]]
-            
+
             if testingEnvironment {
                 seedAddressList = [
-                    1: ["192.168.1.109"],
-                    2: ["192.168.1.109"],
-                    3: ["192.168.1.109"]
+                    1: ["51.250.119.114"],
+                    2: ["51.250.119.114"],
+                    3: ["51.250.119.114"]
                 ]
             } else {
                 seedAddressList = [
-                    1: ["192.168.1.109"],
-                    2: ["192.168.1.109"],
-                    3: ["192.168.1.109"],
-                    4: ["192.168.1.109"],
-                    5: ["192.168.1.109"]
+                    1: ["51.250.119.114"],
+                    2: ["51.250.119.114"],
+                    3: ["51.250.119.114"],
+                    4: ["51.250.119.114"],
+                    5: ["51.250.119.114"]
                 ]
             }
-            
+
             for (id, ips) in seedAddressList {
-                context.setSeedAddressSetForDatacenterWithId(id, seedAddressSet: MTDatacenterAddressSet(addressList: ips.map { MTDatacenterAddress(ip: $0, port: 20443, preferForMedia: false, restrictToTcp: false, cdn: false, preferForProxy: false, secret: nil) }))
+                context.setSeedAddressSetForDatacenterWithId(id, seedAddressSet: MTDatacenterAddressSet(addressList: ips.map { MTDatacenterAddress(ip: $0, port: 4430, preferForMedia: false, restrictToTcp: false, cdn: false, preferForProxy: false, secret: nil) }))
             }
             
             context.keychain = keychain

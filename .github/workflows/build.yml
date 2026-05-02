@@ -4,41 +4,63 @@ on:
   push:
     branches: [ master ]
 
+  pull_request:
+    branches: [ master ]
+
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: macos-26
+    timeout-minutes: 360
+
+    permissions:
+      contents: write   # нужно для создания GitHub Release с .ipa
 
     steps:
-      - uses: actions/checkout@v2
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           submodules: 'recursive'
-          fetch-depth: '0'
+          fetch-depth: 0
 
       - name: Set active Xcode path
         run: |
           XCODE_VERSION=$(cat versions.json | python3 -c 'import json,sys;obj=json.load(sys.stdin);print(obj["xcode"]);')
           sudo xcode-select -s /Applications/Xcode_$XCODE_VERSION.app/Contents/Developer
+          xcodebuild -version
+
+      # Кэширую bazel root + локальный disk_cache между прогонами:
+      # iOS-сборка телеги ~20 минут вхолостую, с кешем держится ~6 минут.
+      # Ключ привязан к pinу bazel + sha submodule'ов чтобы не подтягивать
+      # битый кеш после обновления tgcalls/webrtc/td.
+      - name: Cache bazel
+        uses: actions/cache@v4
+        with:
+          path: |
+            /private/var/tmp/_bazel_containerhost
+            ~/.cache/bazel-disk-cache
+          key: bazel-${{ runner.os }}-${{ hashFiles('versions.json', '.gitmodules', '**/BUILD', '**/*.bzl') }}
+          restore-keys: |
+            bazel-${{ runner.os }}-
 
       - name: Create canonical source directory
         run: |
           set -x
+          # Путь к исходникам захардкожен в Bazel-кешах через `--source_dir`-подобные
+          # параметры — пересборка из другого пути получит cache miss.
           sudo mkdir -p /Users/Shared
-          cp -R $GITHUB_WORKSPACE /Users/Shared/
-          mv /Users/Shared/$(basename $GITHUB_WORKSPACE) /Users/Shared/telegram-ios
+          cp -R "$GITHUB_WORKSPACE" /Users/Shared/
+          mv "/Users/Shared/$(basename "$GITHUB_WORKSPACE")" /Users/Shared/telegram-ios
 
       - name: Build the App
         run: |
           set -x
 
-          # source code paths are included in the final binary, so we need to make them stable across builds
           SOURCE_DIR=/Users/Shared/telegram-ios
-
-          # use canonical bazel root
           BAZEL_USER_ROOT="/private/var/tmp/_bazel_containerhost"
 
-          cd $SOURCE_DIR
+          cd "$SOURCE_DIR"
 
           BUILD_NUMBER_OFFSET="$(cat build_number_offset)"
 
@@ -46,8 +68,8 @@ jobs:
           export COMMIT_COUNT=$(git rev-list --count HEAD)
           export COMMIT_COUNT="$(($COMMIT_COUNT+$BUILD_NUMBER_OFFSET))"
           export BUILD_NUMBER="$COMMIT_COUNT"
-          echo "BUILD_NUMBER=$(echo $BUILD_NUMBER)" >> $GITHUB_ENV
-          echo "APP_VERSION=$(echo $APP_VERSION)" >> $GITHUB_ENV
+          echo "BUILD_NUMBER=$BUILD_NUMBER" >> $GITHUB_ENV
+          echo "APP_VERSION=$APP_VERSION" >> $GITHUB_ENV
 
           python3 build-system/Make/ImportCertificates.py --path build-system/fake-codesigning/certs
           python3 -u build-system/Make/Make.py \
@@ -58,52 +80,53 @@ jobs:
             --configuration=release_arm64 \
             --buildNumber="$BUILD_NUMBER"
 
-          # collect ipa
+          # Сборка артефактов: .ipa + .dSYM
           OUTPUT_PATH="build/artifacts"
           rm -rf "$OUTPUT_PATH"
           mkdir -p "$OUTPUT_PATH"
           for f in bazel-out/applebin_ios-ios_arm*-opt-ST-*/bin/Telegram/Telegram.ipa; do
-            cp "$f" $OUTPUT_PATH/
+            cp "$f" "$OUTPUT_PATH/"
           done
 
-          # collect dsym
           mkdir -p build/DSYMs
           for f in bazel-out/applebin_ios-ios_arm*-opt-ST-*/bin/Telegram/*.dSYM; do
             cp -R "$f" build/DSYMs/
           done
-          zip -r "./$OUTPUT_PATH/Telegram.DSYMs.zip" build/DSYMs 1>/dev/null
+          (cd build && zip -r "../$OUTPUT_PATH/Telegram.DSYMs.zip" DSYMs >/dev/null)
 
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Артефакты прикладываю к workflow run всегда (и для PR, и для master)
+      - name: Upload IPA artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Telegram-${{ env.BUILD_NUMBER }}-ipa
+          path: /Users/Shared/telegram-ios/build/artifacts/Telegram.ipa
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload DSYMs artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Telegram-${{ env.BUILD_NUMBER }}-dsyms
+          path: /Users/Shared/telegram-ios/build/artifacts/Telegram.DSYMs.zip
+          retention-days: 30
+          if-no-files-found: error
+
+      # GitHub Release создаю только из master, не из PR
+      - name: Create Release with assets
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ env.BUILD_NUMBER }}
-          release_name: Telegram ${{ env.APP_VERSION }} (${{ env.BUILD_NUMBER }})
+          name: Opengram ${{ env.APP_VERSION }} (${{ env.BUILD_NUMBER }})
           body: |
-            An unsigned build of Telegram for iOS ${{ env.APP_VERSION }} (${{ env.BUILD_NUMBER }})
+            Unsigned iOS build of Opengram (форк telegram-ios) ${{ env.APP_VERSION }} (${{ env.BUILD_NUMBER }}).
+            Установка через Sideloadly / TrollStore / AltStore.
           draft: false
           prerelease: false
-
-      - name: Upload Release IPA
-        id: upload-release-ipa 
-        uses: actions/upload-release-asset@v1
+          files: |
+            /Users/Shared/telegram-ios/build/artifacts/Telegram.ipa
+            /Users/Shared/telegram-ios/build/artifacts/Telegram.DSYMs.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: /Users/Shared/telegram-ios/build/artifacts/Telegram.ipa
-          asset_name: Telegram.ipa
-          asset_content_type: application/zip
-
-      - name: Upload Release DSYM
-        id: upload-release-dsym 
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: /Users/Shared/telegram-ios/build/artifacts/Telegram.DSYMs.zip
-          asset_name: Telegram.DSYMs.zip
-          asset_content_type: application/zip

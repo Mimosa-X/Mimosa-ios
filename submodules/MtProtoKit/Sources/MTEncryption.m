@@ -754,14 +754,22 @@ NSData *MTRsaEncryptPKCS1OAEP(id<EncryptionProvider> provider, NSString *key, NS
 }
 
 static NSData *decrypt_TL_data(id<EncryptionProvider> provider, unsigned char buffer[256]) {
+    // Этот ключ используется при backup-IP-discovery: когда основной DC
+    // недоступен, клиент идёт в Google/Cloudflare DNS-over-HTTPS за TXT-
+    // записью `apvN.<host>.com`, в которой подписан список fallback-IP.
+    // Подпись валидируется этим ключом. У opengram-ios эта функция
+    // отключена (см. Network.swift:583 — setDiscoverBackupAddressListSignal
+    // закомментирован), но всё равно держу здесь свой ключ — если когда-то
+    // включу fallback и буду публиковать TXT-record на opengra.me, подпись
+    // будет лежать на этом же ключе и пройдёт валидацию из коробки.
     NSString *keyString = @"-----BEGIN PUBLIC KEY-----\n"
-"MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAy2+9TLsRl6RJV6QG7yXO\n"
-"Y195odD8+Arn4lBpItEJnPNvvySU12YsOZOtnYi637dc7nEh7LNlAN/pcfq/7IkR\n"
-"dPayP/pjiDa4i+aSGU01jHv0odR91HeufV5GQS/kfGHQEcehMjYZ5Nj+X4XpoU8z\n"
-"jM9YSoGzsX3cm1GG8qlO3TYa5D5EfxtwiAFlDnG/ZD2FoAFtnf7iuWx5WHpHLTli\n"
-"lrXj7tgCQPwvkia7jc5Vekbxy3InYF4CFqzOkmRZfh7yXp8CukgWMk5ujj5vQ5Qw\n"
-"R8XiLPEI+QO39BiyUu0g2OtOj2oq3hKd9JXKK+T6dkFXbpMy14DNbRIg0qEftHqM\n"
-"uQIDAQAB\n"
+"MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1uh719A/Dx1ijxFO1ftS\n"
+"jT9Bf09yz+32l9E8LXOgDQkCO1urgsqgVk3xWmrh7CtOJeMsB4pN3d9Ljh1+h56R\n"
+"HcyTNt4R+cjBqPWM/PM0fwXzyIlAEuQkI9y3UgMJ76a1DHiMvjbG73Tv+YkRgIGx\n"
+"T8Nl5wA3yX1Q4D2S1ysMBM0JL5oIASHEy01TeT/27nhmt0Q/LFxX8j8e68Pgdvlo\n"
+"WI1x6kRs+JmpfpMrriQ8oV8MTYdg43Q4Xr1m6p3XJjucOWDPi7aXJkg9ivT+ne5C\n"
+"0bVRNLcS+cIohhOMVy1R3rTTDn8URAPeXV3QFuXAg/nXxGzQFGZHxAoNedGEylKj\n"
+"8wIDAQAB\n"
 "-----END PUBLIC KEY-----";
     
     id<MTRsaPublicKey> rsaKey = [provider parseRSAPublicKey:keyString];
