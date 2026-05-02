@@ -64,24 +64,29 @@ jobs:
           # codesign на хосте ищет identity с этим cert + matching private
           # key и не находит. Поэтому генерю свежую self-signed пару прямо
           # в CI — эфемерно, в репу не комитим.
+          #
+          # Использую /usr/bin/openssl (системный LibreSSL), а не openssl
+          # из homebrew (3.x). Apple Security падает на 'MAC verification
+          # failed' если p12 написан OpenSSL 3 — он использует PBMAC1+
+          # PBKDF2 для MAC-KDF, а Security ждёт классический PKCS#12 KDF
+          # из PKCS#5 v1. -legacy + -macalg sha1 не помогли (MAC всё равно
+          # пишется через PBMAC1). LibreSSL пишет PKCS#12 в старом
+          # формате, который Security разбирает без вопросов.
+          #
           # extendedKeyUsage=codeSigning обязателен: security find-identity
           # -p codesigning отбирает identity именно по этому EKU.
-          openssl req -x509 -newkey rsa:2048 -days 3650 -nodes \
+          OSSL=/usr/bin/openssl
+          $OSSL req -x509 -newkey rsa:2048 -days 3650 -nodes \
             -keyout self.key -out self.cer \
             -subj "/CN=Opengram Fake Signing/O=Opengram/C=RU" \
             -addext "extendedKeyUsage=codeSigning"
-          # -legacy + -macalg sha1: macOS security падает с
-          # "MAC verification failed during PKCS12 import", если MAC
-          # написан через PBKDF2-HMAC-SHA256 (default OpenSSL 3). Флаг
-          # -legacy переключает только PBE для encryption (PBE-SHA1+3DES /
-          # PBE-SHA1+RC2-40), MAC надо переключать отдельно через -macalg.
-          openssl pkcs12 -export -out SelfSigned.p12 \
+          $OSSL pkcs12 -export -out SelfSigned.p12 \
             -inkey self.key -in self.cer \
-            -passout pass: -legacy -macalg sha1
+            -passout pass:
           cp self.cer Public.cer
           rm self.key self.cer
-          openssl pkcs12 -in SelfSigned.p12 -passin pass: -nokeys -legacy | \
-            openssl x509 -noout -subject
+          $OSSL pkcs12 -in SelfSigned.p12 -passin pass: -nokeys | \
+            $OSSL x509 -noout -subject
 
       - name: Regenerate fake provisioning profiles
         run: |
