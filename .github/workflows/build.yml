@@ -70,13 +70,14 @@ jobs:
             -keyout self.key -out self.cer \
             -subj "/CN=Opengram Fake Signing/O=Opengram/C=RU" \
             -addext "extendedKeyUsage=codeSigning"
-          # -legacy здесь — чтобы p12 был зашифрован старым PBE-SHA1+RC2-40,
-          # который security/codesign разбирают без вопросов. Без него
-          # OpenSSL 3 пишет AES-256-CBC + PBKDF2-HMAC-SHA256, и macOS-овский
-          # security иногда давится на отдельных версиях.
+          # -legacy + -macalg sha1: macOS security падает с
+          # "MAC verification failed during PKCS12 import", если MAC
+          # написан через PBKDF2-HMAC-SHA256 (default OpenSSL 3). Флаг
+          # -legacy переключает только PBE для encryption (PBE-SHA1+3DES /
+          # PBE-SHA1+RC2-40), MAC надо переключать отдельно через -macalg.
           openssl pkcs12 -export -out SelfSigned.p12 \
             -inkey self.key -in self.cer \
-            -passout pass: -legacy
+            -passout pass: -legacy -macalg sha1
           cp self.cer Public.cer
           rm self.key self.cer
           openssl pkcs12 -in SelfSigned.p12 -passin pass: -nokeys -legacy | \
