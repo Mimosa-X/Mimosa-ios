@@ -56,7 +56,6 @@ jobs:
       - name: Generate self-signed signing cert (overwrite SelfSigned.p12)
         run: |
           set -x
-          cd /Users/Shared/telegram-ios/build-system/fake-codesigning/certs
           # SelfSigned.p12 в репе — на самом деле публичная часть реального
           # AppStore cert'а от Telegram FZ-LLC (CN = "Apple Distribution:
           # Telegram FZ-LLC (C67CF9S4VU)"), без работающего private key.
@@ -65,28 +64,74 @@ jobs:
           # key и не находит. Поэтому генерю свежую self-signed пару прямо
           # в CI — эфемерно, в репу не комитим.
           #
-          # Использую /usr/bin/openssl (системный LibreSSL), а не openssl
-          # из homebrew (3.x). Apple Security падает на 'MAC verification
-          # failed' если p12 написан OpenSSL 3 — он использует PBMAC1+
-          # PBKDF2 для MAC-KDF, а Security ждёт классический PKCS#12 KDF
-          # из PKCS#5 v1. -legacy + -macalg sha1 не помогли (MAC всё равно
-          # пишется через PBMAC1). LibreSSL пишет PKCS#12 в старом
-          # формате, который Security разбирает без вопросов.
+          # openssl (что homebrew 3.x, что системный на macos-26) пишет
+          # PKCS#12 с PBMAC1+PBKDF2 для MAC-KDF — Apple Security такой
+          # формат отвергает с 'MAC verification failed during PKCS12
+          # import'. -legacy и -macalg sha1 переключают только PBE для
+          # encryption, а MAC всё равно идёт через PBMAC1.
+          #
+          # Поэтому генерю p12 через python cryptography с явным
+          # PBES1HmacSHA1And3KeyTripleDESCBC и SHA1 hmac — это классический
+          # PKCS#12 v1 KDF из PKCS#5 v1, Security его разбирает.
           #
           # extendedKeyUsage=codeSigning обязателен: security find-identity
           # -p codesigning отбирает identity именно по этому EKU.
-          OSSL=/usr/bin/openssl
-          $OSSL req -x509 -newkey rsa:2048 -days 3650 -nodes \
-            -keyout self.key -out self.cer \
-            -subj "/CN=Opengram Fake Signing/O=Opengram/C=RU" \
-            -addext "extendedKeyUsage=codeSigning"
-          $OSSL pkcs12 -export -out SelfSigned.p12 \
-            -inkey self.key -in self.cer \
-            -passout pass:
-          cp self.cer Public.cer
-          rm self.key self.cer
-          $OSSL pkcs12 -in SelfSigned.p12 -passin pass: -nokeys | \
-            $OSSL x509 -noout -subject
+          pip3 install --quiet cryptography
+          python3 - <<'EOF'
+          import datetime
+          from cryptography import x509
+          from cryptography.hazmat.primitives import hashes, serialization
+          from cryptography.hazmat.primitives.asymmetric import rsa
+          from cryptography.hazmat.primitives.serialization import pkcs12, PrivateFormat
+          from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+
+          key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+          subject = x509.Name([
+              x509.NameAttribute(NameOID.COMMON_NAME, "Opengram Fake Signing"),
+              x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Opengram"),
+              x509.NameAttribute(NameOID.COUNTRY_NAME, "RU"),
+          ])
+          now = datetime.datetime.now(datetime.timezone.utc)
+          cert = (
+              x509.CertificateBuilder()
+              .subject_name(subject)
+              .issuer_name(subject)
+              .public_key(key.public_key())
+              .serial_number(x509.random_serial_number())
+              .not_valid_before(now)
+              .not_valid_after(now + datetime.timedelta(days=3650))
+              .add_extension(
+                  x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CODE_SIGNING]),
+                  critical=False,
+              )
+              .sign(key, hashes.SHA256())
+          )
+
+          encryption = (
+              PrivateFormat.PKCS12.encryption_builder()
+              .key_cert_algorithm(pkcs12.PBES.PBESv1SHA1And3KeyTripleDESCBC)
+              .hmac_hash(hashes.SHA1())
+              .build(b"")
+          )
+
+          p12_bytes = pkcs12.serialize_key_and_certificates(
+              name=b"Opengram Fake Signing",
+              key=key,
+              cert=cert,
+              cas=None,
+              encryption_algorithm=encryption,
+          )
+
+          out = "build-system/fake-codesigning/certs"
+          with open(f"{out}/SelfSigned.p12", "wb") as f:
+              f.write(p12_bytes)
+          with open(f"{out}/Public.cer", "wb") as f:
+              f.write(cert.public_bytes(serialization.Encoding.DER))
+          print(f"Wrote SelfSigned.p12 ({len(p12_bytes)} bytes) and Public.cer")
+          EOF
+          # Sanity-check — homebrew openssl с -legacy старый формат разбирает
+          openssl pkcs12 -in build-system/fake-codesigning/certs/SelfSigned.p12 \
+            -passin pass: -nokeys -legacy | openssl x509 -noout -subject
 
       - name: Regenerate fake provisioning profiles
         run: |
