@@ -53,6 +53,34 @@ jobs:
           cp -R "$GITHUB_WORKSPACE" /Users/Shared/
           mv "/Users/Shared/$(basename "$GITHUB_WORKSPACE")" /Users/Shared/telegram-ios
 
+      - name: Regenerate fake provisioning profiles
+        run: |
+          set -x
+          cd /Users/Shared/telegram-ios
+          # Профайлы в build-system/fake-codesigning/profiles это реальные
+          # AppStore-профайлы от Telegram FZ-LLC: их DeveloperCertificates[0]
+          # содержит cert от Apple, для которого у нас нет private key.
+          # Я переподписываю каждый .mobileprovision: вынимаю чужой cert и
+          # вставляю DER нашего SelfSigned.p12 (private key которого мы
+          # импортируем шагом ниже через ImportCertificates.py). После этого
+          # bazel/codesign в sandbox найдёт matching identity по hash в
+          # профайле и сможет подписать .ipa.
+          # Логика — в build-system/Make/GenerateProfiles.py, готовая.
+          REGEN_DIR="$PWD/build-input/regen-profiles"
+          rm -rf "$REGEN_DIR"
+          mkdir -p "$REGEN_DIR"
+          python3 - <<'EOF'
+          import sys
+          sys.path.insert(0, 'build-system/Make')
+          import GenerateProfiles
+          GenerateProfiles.generate_provisioning_profiles(
+              source_path='build-system/fake-codesigning/profiles',
+              destination_path='build-input/regen-profiles',
+              certs_path='build-system/fake-codesigning/certs',
+          )
+          EOF
+          cp -f "$REGEN_DIR"/*.mobileprovision build-system/fake-codesigning/profiles/
+
       - name: Build the App
         run: |
           set -x
@@ -71,15 +99,15 @@ jobs:
           echo "BUILD_NUMBER=$BUILD_NUMBER" >> $GITHUB_ENV
           echo "APP_VERSION=$APP_VERSION" >> $GITHUB_ENV
 
-          # Импорт fake-codesigning сертификатов всё равно делаю — они
-          # нужны bazel-у для sandbox-codesigning при сборке main-target.
-          # Но --disableProvisioningProfiles отключает реальный matching
-          # provisioning-профайлов для extension'ов (Widget/Share/...) —
-          # без него bazel падает с "Unable to find an identity matching
-          # the ones in Widget.mobileprovision", потому что Widget.mobile-
-          # provision это реальный AppStore-профайл от Telegram FZ-LLC,
-          # а наш SelfSigned.p12 не имеет соответствующего private key.
+          # Импорт SelfSigned.p12 в login.keychain. Профайлы шагом выше
+          # уже переподписаны нашим cert, так что bazel matching отработает.
           python3 build-system/Make/ImportCertificates.py --path build-system/fake-codesigning/certs
+          # release_arm64 — реальная device-сборка, на выходе .ipa который
+          # ставится через Sideloadly / TrollStore / AltStore. --disableExtensions
+          # оставляю: extensions (Widget/Share/Watch/Intents) тащат за собой
+          # entitlements, которые apple-issued profile подтверждает на App Store
+          # серверах — даже с переподписью fake-cert эти entitlements в runtime
+          # отвалятся. Для sideload main-app достаточно.
           python3 -u build-system/Make/Make.py \
             --bazelUserRoot="$BAZEL_USER_ROOT" \
             build \
@@ -87,7 +115,6 @@ jobs:
             --codesigningInformationPath=build-system/fake-codesigning \
             --configuration=release_arm64 \
             --buildNumber="$BUILD_NUMBER" \
-            --disableProvisioningProfiles \
             --disableExtensions
 
           # Сборка артефактов: .ipa + .dSYM
