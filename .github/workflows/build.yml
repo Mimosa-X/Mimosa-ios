@@ -53,18 +53,44 @@ jobs:
           cp -R "$GITHUB_WORKSPACE" /Users/Shared/
           mv "/Users/Shared/$(basename "$GITHUB_WORKSPACE")" /Users/Shared/telegram-ios
 
+      - name: Generate self-signed signing cert (overwrite SelfSigned.p12)
+        run: |
+          set -x
+          cd /Users/Shared/telegram-ios/build-system/fake-codesigning/certs
+          # SelfSigned.p12 в репе — на самом деле публичная часть реального
+          # AppStore cert'а от Telegram FZ-LLC (CN = "Apple Distribution:
+          # Telegram FZ-LLC (C67CF9S4VU)"), без работающего private key.
+          # GenerateProfiles вшивает его DER в DeveloperCertificates, потом
+          # codesign на хосте ищет identity с этим cert + matching private
+          # key и не находит. Поэтому генерю свежую self-signed пару прямо
+          # в CI — эфемерно, в репу не комитим.
+          # extendedKeyUsage=codeSigning обязателен: security find-identity
+          # -p codesigning отбирает identity именно по этому EKU.
+          openssl req -x509 -newkey rsa:2048 -days 3650 -nodes \
+            -keyout self.key -out self.cer \
+            -subj "/CN=Opengram Fake Signing/O=Opengram/C=RU" \
+            -addext "extendedKeyUsage=codeSigning"
+          # -legacy здесь — чтобы p12 был зашифрован старым PBE-SHA1+RC2-40,
+          # который security/codesign разбирают без вопросов. Без него
+          # OpenSSL 3 пишет AES-256-CBC + PBKDF2-HMAC-SHA256, и macOS-овский
+          # security иногда давится на отдельных версиях.
+          openssl pkcs12 -export -out SelfSigned.p12 \
+            -inkey self.key -in self.cer \
+            -passout pass: -legacy
+          cp self.cer Public.cer
+          rm self.key self.cer
+          openssl pkcs12 -in SelfSigned.p12 -passin pass: -nokeys -legacy | \
+            openssl x509 -noout -subject
+
       - name: Regenerate fake provisioning profiles
         run: |
           set -x
           cd /Users/Shared/telegram-ios
-          # Профайлы в build-system/fake-codesigning/profiles это реальные
-          # AppStore-профайлы от Telegram FZ-LLC: их DeveloperCertificates[0]
-          # содержит cert от Apple, для которого у нас нет private key.
-          # Я переподписываю каждый .mobileprovision: вынимаю чужой cert и
-          # вставляю DER нашего SelfSigned.p12 (private key которого мы
-          # импортируем шагом ниже через ImportCertificates.py). После этого
-          # bazel/codesign в sandbox найдёт matching identity по hash в
-          # профайле и сможет подписать .ipa.
+          # Беру свежесгенерированный SelfSigned.p12, выдираю его cert в DER,
+          # подменяю DeveloperCertificates[0] во всех .mobileprovision файлах
+          # и заново подписываю plist через cms -S тем же cert+key. После
+          # этого bazel/codesign в sandbox по hash из профайла найдёт нашу
+          # identity в keychain и сможет подписать .ipa.
           # Логика — в build-system/Make/GenerateProfiles.py, готовая.
           REGEN_DIR="$PWD/build-input/regen-profiles"
           rm -rf "$REGEN_DIR"
