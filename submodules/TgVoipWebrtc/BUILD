@@ -113,6 +113,7 @@ sources = glob([
     "tgcalls/tgcalls/group/VideoStreamingPart.cpp",
 
     "tgcalls/tgcalls/v2/ContentNegotiation.cpp",
+    "tgcalls/tgcalls/v2/CustomDcSctpSocket.cpp",
     "tgcalls/tgcalls/v2/DirectNetworkingImpl.cpp",
     "tgcalls/tgcalls/v2/ExternalSignalingConnection.cpp",
     "tgcalls/tgcalls/v2/InstanceV2Impl.cpp",
