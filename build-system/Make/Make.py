@@ -46,6 +46,7 @@ class BazelCommandLine:
         self.show_actions = False
         self.enable_sandbox = False
         self.disable_provisioning_profiles = False
+        self.disable_extensions = False
         self.profile_swift = False
 
         self.common_args = [
@@ -136,6 +137,9 @@ class BazelCommandLine:
 
     def set_disable_provisioning_profiles(self):
         self.disable_provisioning_profiles = True
+
+    def set_disable_extensions(self):
+        self.disable_extensions = True
 
     def set_profile_swift(self, value):
         self.profile_swift = value
@@ -281,6 +285,13 @@ class BazelCommandLine:
         if self.disable_provisioning_profiles:
             combined_arguments += ['--//Telegram:disableProvisioningProfiles']
 
+        if self.disable_extensions:
+            # Без этого флага rules_apple требует provisioning_profile у каждого
+            # extension'а (IntentsExtension/WidgetExtension/ShareExtension/…).
+            # У нас в fake-codesigning нет matching cert → bazel валится с
+            # «Building for device, but no provisioning_profile attribute was set».
+            combined_arguments += ['--//Telegram:disableExtensions']
+
         combined_arguments += self.common_args
         combined_arguments += self.common_build_args
         combined_arguments += self.get_define_arguments()
@@ -388,6 +399,13 @@ class BazelCommandLine:
 
         if self.disable_provisioning_profiles:
             combined_arguments += ['--//Telegram:disableProvisioningProfiles']
+
+        if self.disable_extensions:
+            # Без этого флага rules_apple требует provisioning_profile у каждого
+            # extension'а (IntentsExtension/WidgetExtension/ShareExtension/…).
+            # У нас в fake-codesigning нет matching cert → bazel валится с
+            # «Building for device, but no provisioning_profile attribute was set».
+            combined_arguments += ['--//Telegram:disableExtensions']
 
         combined_arguments += self.common_args
         combined_arguments += self.common_build_args
@@ -623,6 +641,8 @@ def build(bazel, arguments):
 
     if getattr(arguments, 'disableProvisioningProfiles', False):
         bazel_command_line.set_disable_provisioning_profiles()
+    if getattr(arguments, 'disableExtensions', False):
+        bazel_command_line.set_disable_extensions()
 
     bazel_command_line.set_split_swiftmodules(arguments.enableParallelSwiftmoduleGeneration)
 
@@ -1005,6 +1025,20 @@ if __name__ == '__main__':
             matching the ones in <Extension>.mobileprovision" because the bundled
             fake-codesigning material does not include private keys for the official
             Telegram FZ-LLC provisioning profiles.
+            ''',
+    )
+    buildParser.add_argument(
+        '--disableExtensions',
+        action='store_true',
+        default=False,
+        help='''
+            Build without iOS extensions (IntentsExtension / WidgetExtension /
+            ShareExtension / NotificationContent / NotificationService / WatchApp /
+            BroadcastUpload). Без этого rules_apple на стадии analysis требует
+            provisioning_profile у каждого extension даже если у главного бинарника
+            оно отключено через --disableProvisioningProfiles. Для unsigned-CI-сборки
+            (Sideloadly / TrollStore) extension'ы всё равно бесполезны, поэтому
+            проще их выкинуть из main app.
             ''',
     )
     buildParser.add_argument(
