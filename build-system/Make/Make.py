@@ -621,6 +621,9 @@ def build(bazel, arguments):
     bazel_command_line.set_enable_sandbox(arguments.sandbox)
     bazel_command_line.set_profile_swift(arguments.profileSwift)
 
+    if getattr(arguments, 'disableProvisioningProfiles', False):
+        bazel_command_line.set_disable_provisioning_profiles()
+
     bazel_command_line.set_split_swiftmodules(arguments.enableParallelSwiftmoduleGeneration)
 
     bazel_command_line.invoke_build()
@@ -989,6 +992,20 @@ if __name__ == '__main__':
         action='store_true',
         default=False,
         help='Continue build process after an error.',
+    )
+    buildParser.add_argument(
+        '--disableProvisioningProfiles',
+        action='store_true',
+        default=False,
+        help='''
+            Build without using provisioning profiles. The resulting ipa will be unsigned.
+            This is useful for CI/CD where there is no real Apple Developer account, and the
+            ipa is intended to be sideloaded (Sideloadly / TrollStore / AltStore).
+            Without this flag bazel will fail with "Unable to find an identity on the system
+            matching the ones in <Extension>.mobileprovision" because the bundled
+            fake-codesigning material does not include private keys for the official
+            Telegram FZ-LLC provisioning profiles.
+            ''',
     )
     buildParser.add_argument(
         '--showActions',

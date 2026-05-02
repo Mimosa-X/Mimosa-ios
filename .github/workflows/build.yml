@@ -71,6 +71,14 @@ jobs:
           echo "BUILD_NUMBER=$BUILD_NUMBER" >> $GITHUB_ENV
           echo "APP_VERSION=$APP_VERSION" >> $GITHUB_ENV
 
+          # Импорт fake-codesigning сертификатов всё равно делаю — они
+          # нужны bazel-у для sandbox-codesigning при сборке main-target.
+          # Но --disableProvisioningProfiles отключает реальный matching
+          # provisioning-профайлов для extension'ов (Widget/Share/...) —
+          # без него bazel падает с "Unable to find an identity matching
+          # the ones in Widget.mobileprovision", потому что Widget.mobile-
+          # provision это реальный AppStore-профайл от Telegram FZ-LLC,
+          # а наш SelfSigned.p12 не имеет соответствующего private key.
           python3 build-system/Make/ImportCertificates.py --path build-system/fake-codesigning/certs
           python3 -u build-system/Make/Make.py \
             --bazelUserRoot="$BAZEL_USER_ROOT" \
@@ -78,7 +86,8 @@ jobs:
             --configurationPath="build-system/appstore-configuration.json" \
             --codesigningInformationPath=build-system/fake-codesigning \
             --configuration=release_arm64 \
-            --buildNumber="$BUILD_NUMBER"
+            --buildNumber="$BUILD_NUMBER" \
+            --disableProvisioningProfiles
 
           # Сборка артефактов: .ipa + .dSYM
           OUTPUT_PATH="build/artifacts"
