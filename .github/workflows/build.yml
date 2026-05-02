@@ -76,7 +76,7 @@ jobs:
           #
           # extendedKeyUsage=codeSigning обязателен: security find-identity
           # -p codesigning отбирает identity именно по этому EKU.
-          pip3 install --quiet cryptography
+          pip3 install --quiet --user --break-system-packages cryptography
           python3 - <<'EOF'
           import datetime
           from cryptography import x509
