@@ -150,28 +150,31 @@ jobs:
           # GenerateProfiles.py и ImportCertificates.py хардкодят пустой
           # пароль на p12 ("fake-codesigning uses empty password"). После
           # перехода на python cryptography с обязательным непустым
-          # паролем им надо подставить "secret". Через python regex чтобы
-          # не форкать build-system/Make/.
+          # паролем им надо подставить "secret". Прохожусь по обоим
+          # файлам с assert'ами, чтобы фейлиться сразу если паттерн
+          # не нашёлся (а не молча идти в codesign error).
           python3 - <<'EOF'
           import re, pathlib
-          gp = pathlib.Path('build-system/Make/GenerateProfiles.py')
-          gp.write_text(gp.read_text().replace(
-              "p12_password = ''",
-              "p12_password = 'secret'",
-          ))
-          ic = pathlib.Path('build-system/Make/ImportCertificates.py')
-          # '-P', '' где '' это пароль; заменяю на 'secret'.
-          # Для .cer файлов пароль security import игнорит — безопасно.
-          ic.write_text(re.sub(
-              r"('-P',\s*\n\s*)''",
-              r"\1'secret'",
-              ic.read_text(),
-          ))
-          print("Patched")
+          gp_path = pathlib.Path('build-system/Make/GenerateProfiles.py')
+          gp = gp_path.read_text()
+          new_gp = gp.replace("p12_password = ''", "p12_password = 'secret'")
+          assert new_gp != gp, "GenerateProfiles patch didn't match"
+          gp_path.write_text(new_gp)
+
+          ic_path = pathlib.Path('build-system/Make/ImportCertificates.py')
+          ic = ic_path.read_text()
+          # Два инстанса '-P','' с разным индентом (16 spaces в for-loop,
+          # 8 spaces на top-level). Использую regex с \s+ — match'ится
+          # любой indent.
+          new_ic, n = re.subn(r"('-P',\s+)''(?=,?\s*\n)", r"\1'secret'", ic)
+          assert n == 2, f"ImportCertificates patch matched {n} times, expected 2"
+          ic_path.write_text(new_ic)
+          print(f"Patched: GP=1, IC={n}")
           EOF
-          grep -n "secret\|p12_password" \
+          # Полный grep, без head — чтобы видно было оба файла
+          grep -n "secret\|p12_password\|'-P'" \
             build-system/Make/GenerateProfiles.py \
-            build-system/Make/ImportCertificates.py | head
+            build-system/Make/ImportCertificates.py
 
       - name: Regenerate fake provisioning profiles
         run: |
@@ -219,6 +222,13 @@ jobs:
           # Импорт SelfSigned.p12 в login.keychain. Профайлы шагом выше
           # уже переподписаны нашим cert, так что bazel matching отработает.
           python3 build-system/Make/ImportCertificates.py --path build-system/fake-codesigning/certs
+          # Debug: что реально лежит в keychain после импорта.
+          echo "=== keychain search list (user) ==="
+          security list-keychains -d user || true
+          echo "=== identities for codesigning ==="
+          security find-identity -v -p codesigning || true
+          echo "=== all identities ==="
+          security find-identity -v || true
           # release_arm64 — реальная device-сборка, на выходе .ipa который
           # ставится через Sideloadly / TrollStore / AltStore. --disableExtensions
           # оставляю: extensions (Widget/Share/Watch/Intents) тащат за собой
