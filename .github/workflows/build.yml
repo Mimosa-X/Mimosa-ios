@@ -56,6 +56,11 @@ jobs:
       - name: Generate self-signed signing cert (overwrite SelfSigned.p12)
         run: |
           set -x
+          # Все остальные шаги работают из /Users/Shared/telegram-ios
+          # (canonical path для bazel-кеша). Если писать в относительный
+          # путь от $GITHUB_WORKSPACE — regen-step возьмёт исходный p12 из
+          # каноничного пути и перепишет всё в FZ-LLC. Поэтому cd сюда.
+          cd /Users/Shared/telegram-ios
           # SelfSigned.p12 в репе — на самом деле публичная часть реального
           # AppStore cert'а от Telegram FZ-LLC (CN = "Apple Distribution:
           # Telegram FZ-LLC (C67CF9S4VU)"), без работающего private key.
