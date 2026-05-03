@@ -223,24 +223,20 @@ jobs:
           # уже переподписаны нашим cert, так что bazel matching отработает.
           python3 build-system/Make/ImportCertificates.py --path build-system/fake-codesigning/certs
 
-          # ImportCertificates глотает ошибки security import через
-          # check_result=False. Делаю прямой повторный импорт с проверкой
-          # exit-кода, чтобы surface'ить реальную ошибку — если она есть.
-          # temp.keychain уже создан и разлочен ImportCertificates.
-          echo "=== re-running security import directly with verbose ==="
-          security unlock-keychain -p secret temp.keychain
-          security import build-system/fake-codesigning/certs/SelfSigned.p12 \
-            -k temp.keychain -P secret \
-            -T /usr/bin/codesign -T /usr/bin/security \
-            -A
-          echo "=== dump-keychain (показать всё что внутри temp.keychain) ==="
-          security dump-keychain temp.keychain | head -50 || true
-          echo "=== identities for codesigning ==="
+          # ImportCertificates импортирует pair OK ("1 identity imported"),
+          # но security find-identity -v -p codesigning возвращает 0 —
+          # потому что -v фильтрует на trust-validated, а self-signed cert
+          # не в trust store. Нужно явно довериться нашему cert как
+          # codeSigning root в системном keychain'е, тогда find-identity -v
+          # его увидит и bazel rules_apple тоже.
+          echo "=== Trusting Public.cer as codeSigning root ==="
+          sudo security add-trusted-cert -d -r trustRoot \
+            -p codeSign \
+            -k /Library/Keychains/System.keychain \
+            build-system/fake-codesigning/certs/Public.cer
+
+          echo "=== identities for codesigning (after trust) ==="
           security find-identity -v -p codesigning || true
-          echo "=== all identities ==="
-          security find-identity -v || true
-          echo "=== identities in temp.keychain specifically ==="
-          security find-identity -v -p codesigning temp.keychain || true
           # release_arm64 — реальная device-сборка, на выходе .ipa который
           # ставится через Sideloadly / TrollStore / AltStore. --disableExtensions
           # оставляю: extensions (Widget/Share/Watch/Intents) тащат за собой
