@@ -112,18 +112,24 @@ jobs:
               .sign(key, hashes.SHA256())
           )
 
-          # Builder для PBES1 с пустым паролем падает с
-          # "Password must be 1 or more bytes". Использую NoEncryption()
-          # вместо builder'а — p12 без шифрования, security import -P ''
-          # такие p12 разбирает (encryption optional в PKCS#12 spec).
-          # GenerateProfiles и ImportCertificates обе хардкодят -P ''
-          # / passin pass: — менять их не надо.
+          # NoEncryption() не помог — cryptography всё равно пишет MAC
+          # через PBMAC1+PBKDF2 (Apple Security не понимает). Builder с
+          # hmac_hash(SHA1) даёт классический PKCS#12 MAC (PKCS#5 v1
+          # KDF + HMAC-SHA1), но требует непустой пароль. Использую
+          # "secret" — GenerateProfiles.py и ImportCertificates.py
+          # пропатчены sed'ом ниже шагом, чтобы передавать тот же пароль.
+          encryption = (
+              PrivateFormat.PKCS12.encryption_builder()
+              .key_cert_algorithm(pkcs12.PBES.PBESv1SHA1And3KeyTripleDESCBC)
+              .hmac_hash(hashes.SHA1())
+              .build(b"secret")
+          )
           p12_bytes = pkcs12.serialize_key_and_certificates(
               name=b"Opengram Fake Signing",
               key=key,
               cert=cert,
               cas=None,
-              encryption_algorithm=serialization.NoEncryption(),
+              encryption_algorithm=encryption,
           )
 
           out = "build-system/fake-codesigning/certs"
@@ -135,7 +141,37 @@ jobs:
           EOF
           # Sanity-check — homebrew openssl с -legacy старый формат разбирает
           openssl pkcs12 -in build-system/fake-codesigning/certs/SelfSigned.p12 \
-            -passin pass: -nokeys -legacy | openssl x509 -noout -subject
+            -passin pass:secret -nokeys -legacy | openssl x509 -noout -subject
+
+      - name: Patch p12 password to "secret" in build scripts
+        run: |
+          set -x
+          cd /Users/Shared/telegram-ios
+          # GenerateProfiles.py и ImportCertificates.py хардкодят пустой
+          # пароль на p12 ("fake-codesigning uses empty password"). После
+          # перехода на python cryptography с обязательным непустым
+          # паролем им надо подставить "secret". Через python regex чтобы
+          # не форкать build-system/Make/.
+          python3 - <<'EOF'
+          import re, pathlib
+          gp = pathlib.Path('build-system/Make/GenerateProfiles.py')
+          gp.write_text(gp.read_text().replace(
+              "p12_password = ''",
+              "p12_password = 'secret'",
+          ))
+          ic = pathlib.Path('build-system/Make/ImportCertificates.py')
+          # '-P', '' где '' это пароль; заменяю на 'secret'.
+          # Для .cer файлов пароль security import игнорит — безопасно.
+          ic.write_text(re.sub(
+              r"('-P',\s*\n\s*)''",
+              r"\1'secret'",
+              ic.read_text(),
+          ))
+          print("Patched")
+          EOF
+          grep -n "secret\|p12_password" \
+            build-system/Make/GenerateProfiles.py \
+            build-system/Make/ImportCertificates.py | head
 
       - name: Regenerate fake provisioning profiles
         run: |
