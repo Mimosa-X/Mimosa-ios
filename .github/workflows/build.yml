@@ -270,16 +270,19 @@ jobs:
             --buildNumber="$BUILD_NUMBER" \
             --disableExtensions
 
-          # Сборка артефактов: .ipa + .dSYM
+          # Сборка артефактов: .ipa + .dSYM. Использую симлинк bazel-bin
+          # (он указывает на актуальный bazel-out/<config-hash>/bin), а не
+          # на сам bazel-out с глобом — config-hash в имени папки меняется
+          # между версиями bazel и unmatched glob становится литералом, cp
+          # падает на 'No such file or directory'.
           OUTPUT_PATH="build/artifacts"
           rm -rf "$OUTPUT_PATH"
           mkdir -p "$OUTPUT_PATH"
-          for f in bazel-out/applebin_ios-ios_arm*-opt-ST-*/bin/Telegram/Telegram.ipa; do
-            cp "$f" "$OUTPUT_PATH/"
-          done
+          cp bazel-bin/Telegram/Telegram.ipa "$OUTPUT_PATH/"
 
           mkdir -p build/DSYMs
-          for f in bazel-out/applebin_ios-ios_arm*-opt-ST-*/bin/Telegram/*.dSYM; do
+          shopt -s nullglob
+          for f in bazel-bin/Telegram/*.dSYM; do
             cp -R "$f" build/DSYMs/
           done
           (cd build && zip -r "../$OUTPUT_PATH/Telegram.DSYMs.zip" DSYMs >/dev/null)
