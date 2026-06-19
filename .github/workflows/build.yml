@@ -165,20 +165,12 @@ jobs:
         run: |
           set -x
           cd /Users/Shared/telegram-ios
-          # GenerateProfiles.py и ImportCertificates.py хардкодят пустой
-          # пароль на p12 ("fake-codesigning uses empty password"). После
+          # ImportCertificates.py хардкодит пустой пароль на p12. После
           # перехода на python cryptography с обязательным непустым
-          # паролем им надо подставить "secret". Прохожусь по обоим
-          # файлам с assert'ами, чтобы фейлиться сразу если паттерн
-          # не нашёлся (а не молча идти в codesign error).
+          # паролем ему надо подставить "secret". GenerateProfiles.py
+          # получает пароль явно через p12_password='secret'.
           python3 - <<'EOF'
           import re, pathlib
-          gp_path = pathlib.Path('build-system/Make/GenerateProfiles.py')
-          gp = gp_path.read_text()
-          new_gp = gp.replace("p12_password = ''", "p12_password = 'secret'")
-          assert new_gp != gp, "GenerateProfiles patch didn't match"
-          gp_path.write_text(new_gp)
-
           ic_path = pathlib.Path('build-system/Make/ImportCertificates.py')
           ic = ic_path.read_text()
           # Два инстанса '-P','' с разным индентом (16 spaces в for-loop,
@@ -187,23 +179,17 @@ jobs:
           new_ic, n = re.subn(r"('-P',\s+)''(?=,?\s*\n)", r"\1'secret'", ic)
           assert n == 2, f"ImportCertificates patch matched {n} times, expected 2"
           ic_path.write_text(new_ic)
-          print(f"Patched: GP=1, IC={n}")
+          print(f"Patched ImportCertificates: {n}")
           EOF
-          # Полный grep, без head — чтобы видно было оба файла
-          grep -n "secret\|p12_password\|'-P'" \
-            build-system/Make/GenerateProfiles.py \
-            build-system/Make/ImportCertificates.py
+          grep -n "secret\|'-P'" build-system/Make/ImportCertificates.py
 
       - name: Regenerate fake provisioning profiles
         run: |
           set -x
           cd /Users/Shared/telegram-ios
-          # Беру свежесгенерированный SelfSigned.p12, выдираю его cert в DER,
-          # подменяю DeveloperCertificates[0] во всех .mobileprovision файлах
-          # и заново подписываю plist через cms -S тем же cert+key. После
-          # этого bazel/codesign в sandbox по hash из профайла найдёт нашу
-          # identity в keychain и сможет подписать .ipa.
-          # Логика — в build-system/Make/GenerateProfiles.py, готовая.
+          # Беру свежесгенерированный SelfSigned.p12, патчу application-identifier
+          # из appstore-configuration.json, подменяю DeveloperCertificates[0]
+          # во всех .mobileprovision файлах и заново подписываю plist через cms -S.
           REGEN_DIR="$PWD/build-input/regen-profiles"
           rm -rf "$REGEN_DIR"
           mkdir -p "$REGEN_DIR"
@@ -215,6 +201,8 @@ jobs:
               source_path='build-system/fake-codesigning/profiles',
               destination_path='build-input/regen-profiles',
               certs_path='build-system/fake-codesigning/certs',
+              configuration_path='build-system/appstore-configuration.json',
+              p12_password='secret',
           )
           EOF
           cp -f "$REGEN_DIR"/*.mobileprovision build-system/fake-codesigning/profiles/
