@@ -7,8 +7,8 @@
 	"is_internal_build": "false",
 	"is_appstore_build": "true",
 	"appstore_id": "686449807",
-	"app_specific_url_scheme": "mimosa",
-	"premium_iap_product_id": "org.mimosa.messenger.premium.monthly",
-	"enable_siri": false,
-	"enable_icloud": false
+	"app_specific_url_scheme": "tg",
+	"premium_iap_product_id": "org.telegram.telegramPremium.monthly",
+	"enable_siri": true,
+	"enable_icloud": true
 }
